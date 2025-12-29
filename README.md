@@ -24,3 +24,10 @@ curl -X POST http://127.0.0.1:8000/conversations/upload \
   -H "Content-Type: application/json" \
   -d '{"user_id":"user_123","raw_text":"다음주 토요일 전시회 가자"}'
 ```
+
+## Database migrations
+```bash
+cd server
+export DATABASE_URL="sqlite:///./app.db"
+alembic upgrade head
+```

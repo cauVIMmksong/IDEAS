@@ -1,38 +1,28 @@
 from datetime import datetime
-from typing import Literal
+from uuid import uuid4
 
-from fastapi import FastAPI
-from pydantic import BaseModel, Field
+from fastapi import Depends, FastAPI
+from sqlalchemy.orm import Session
+
+from .database import SessionLocal
+from .models import Conversation, Todo, User
+from .schemas import (
+    ConversationUploadRequest,
+    ConversationUploadResponse,
+    TodoExtractionRequest,
+    TodoExtractionResponse,
+)
+from .todo_rules import extract_todos
 
 app = FastAPI(title="Couple Planner API", version="0.1.0")
 
 
-class ConversationUploadRequest(BaseModel):
-    user_id: str = Field(..., examples=["user_123"])
-    source: Literal["upload"] = "upload"
-    raw_text: str = Field(..., min_length=1)
-
-
-class ConversationUploadResponse(BaseModel):
-    conversation_id: str
-    received_at: datetime
-
-
-class TodoExtractionRequest(BaseModel):
-    conversation_id: str
-    raw_text: str = Field(..., min_length=1)
-
-
-class TodoItem(BaseModel):
-    title: str
-    due_date: datetime | None = None
-
-
-class TodoExtractionResponse(BaseModel):
-    todos: list[TodoItem]
-
-
-_CONVERSATIONS: dict[str, ConversationUploadRequest] = {}
+def get_db() -> Session:
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 @app.get("/health")
@@ -41,16 +31,43 @@ def health_check() -> dict:
 
 
 @app.post("/conversations/upload", response_model=ConversationUploadResponse)
-def upload_conversation(payload: ConversationUploadRequest) -> ConversationUploadResponse:
-    conversation_id = f"conv_{len(_CONVERSATIONS) + 1}"
-    _CONVERSATIONS[conversation_id] = payload
+def upload_conversation(
+    payload: ConversationUploadRequest, db: Session = Depends(get_db)
+) -> ConversationUploadResponse:
+    user = db.get(User, payload.user_id)
+    if user is None:
+        user = User(id=payload.user_id)
+        db.add(user)
+    conversation = Conversation(
+        id=f"conv_{uuid4().hex[:12]}",
+        user_id=payload.user_id,
+        source=payload.source,
+        raw_text=payload.raw_text,
+    )
+    db.add(conversation)
+    db.commit()
     return ConversationUploadResponse(
-        conversation_id=conversation_id,
-        received_at=datetime.utcnow(),
+        conversation_id=conversation.id,
+        received_at=conversation.created_at,
     )
 
 
 @app.post("/analysis/todos", response_model=TodoExtractionResponse)
-def analyze_todos(payload: TodoExtractionRequest) -> TodoExtractionResponse:
-    _ = payload
-    return TodoExtractionResponse(todos=[])
+def analyze_todos(
+    payload: TodoExtractionRequest, db: Session = Depends(get_db)
+) -> TodoExtractionResponse:
+    conversation = db.get(Conversation, payload.conversation_id)
+    todos = extract_todos(payload.raw_text)
+    if conversation:
+        for todo in todos:
+            db.add(
+                Todo(
+                    id=f"todo_{uuid4().hex[:12]}",
+                    user_id=conversation.user_id,
+                    conversation_id=payload.conversation_id,
+                    title=todo.title,
+                    due_date=todo.due_date,
+                )
+            )
+        db.commit()
+    return TodoExtractionResponse(todos=todos)

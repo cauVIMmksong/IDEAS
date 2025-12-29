@@ -22,3 +22,8 @@ Start with conversation log upload, basic todo extraction response, and a simple
 - Define request/response schemas.
 - Add storage (PostgreSQL).
 - Implement NLP extraction.
+
+## Current Implementation Notes
+- Alembic migrations added for `users`, `conversations`, `todos`.
+- Todo extraction uses 20 simple keyword-based rules as a placeholder.
+- `DATABASE_URL` 환경 변수를 통해 DB 연결을 설정한다.
